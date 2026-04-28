@@ -240,9 +240,15 @@ Each box shows the 5 repetition measurements (R1–R5) for one device in one mod
 
 | Device | Mean CFO (all modulations) | Within-session std |
 |---|---|---|
-| DEV01 | *(from your run)* Hz | *(from your run)* Hz |
-| DEV02 | *(from your run)* Hz | *(from your run)* Hz |
+| DEV01 | +544.6 Hz (OOK) / −408.4 Hz (BPSK) | 68 Hz (OOK) / 634 Hz (BPSK) |
+| DEV02 | +742.0 Hz (OOK) / +479.3 Hz (BPSK) | 109 Hz (OOK) / 257 Hz (BPSK) |
 | **Separation** | ***(from your run)* Hz** | — |
+
+> **Finding:** CFO is reliable for OOK (separation 197 Hz, σ < 110 Hz) 
+> and partially for BPSK (separation 887 Hz). For QPSK and GFSK the 
+> instantaneous frequency estimator is unreliable because symbol phase 
+> jumps overwhelm the CFO signal. A different feature dominates those 
+> modulations — see Section 10.
 
 > **How to read this:** A large separation with a small standard deviation means the two devices produce clearly different, stable CFO values. The standard deviation being much smaller than the separation means the two distributions do not overlap — the CFO alone is enough to tell the devices apart.
 
@@ -332,6 +338,16 @@ A high FDR means the gap between the two device values is large relative to the 
 
 ![Feature Separability Heatmap](analysis_plots/10_feature_separability_heatmap.png)
 
+> **Key result from the heatmap:** The dominant fingerprint feature is 
+> modulation-dependent. RMS amplitude has the highest Fisher Discriminant 
+> Ratio for QPSK (22.8) and GFSK (15.1), meaning the two devices transmit 
+> at consistently different power levels for those modulations. CFO 
+> dominates for OOK (2.9) where it is cleanly measurable. For BPSK both 
+> RMS (2.8) and CFO (2.1) contribute. This finding justifies the raw-IQ 
+> CNN approach — the model learns from the full signal and naturally 
+> exploits whichever feature is strongest, without needing to know in 
+> advance which feature matters for each modulation.
+
 The heatmap shows FDR for 9 features × 4 modulations. Darker = more discriminating.
 
 **Features tested:**
@@ -382,12 +398,13 @@ Each of the 8 panels (2 devices × 4 modulations) shows CFO across R1–R5 with 
 
 ### What was found
 
-| Feature | Separable? | Stable? | Role in fingerprint |
-|---|---|---|---|
-| Carrier Frequency Offset (CFO) | Yes — large gap | Yes — sub-Hz std | **Primary feature** |
-| DC Offset | Partial | Yes | Secondary |
-| Mean Amplitude | Partial | Moderate | Secondary |
-| Amplitude Std / Kurtosis | Small | Moderate | Weak |
+| Feature | BPSK FDR | QPSK FDR | GFSK FDR | OOK FDR | Role |
+|---|---|---|---|---|---|
+| RMS | 2.8 | 22.8 | 15.1 | 0.0 | Primary — QPSK, GFSK |
+| CFO | 2.1 | 0.1 | 0.2 | 2.9 | Primary — OOK, BPSK |
+| Mean Amplitude | 1.5 | 1.4 | 15.2 | 0.0 | Supporting — GFSK |
+| Kurtosis | 1.4 | 1.4 | 0.2 | 0.3 | Weak |
+| DC Offset | 0.1–1.0 | 0.0–0.1 | 0.1–1.0 | 0.0–0.5 | Weak |
 
 ### The CFO fingerprint in plain language
 
