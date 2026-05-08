@@ -1,10 +1,12 @@
-# Session 1 Signal Analysis Report
+# RF Fingerprinting — Full Experiment Report
 
 **Project:** Lightweight Device Authentication Using RF Fingerprinting  
 **University:** Kristianstad University (HKR) — Course DT339G VT26  
-**Authors:** Amitha · Tharangi Madushani  
+**Authors:** Amitha Sanjaya · Tharangi Madushani  
 **Supervisor:** Prof. Qinghua Wang  
-**Date:** April 2026
+**Last updated:** May 2026
+
+> This report covers the complete experiment pipeline — from initial signal analysis through preprocessing, binary classification, multi-modulation authentication, feature comparison, and one-class authentication. The Session 1 signal analysis (Steps 1–12) is documented in full detail below. All subsequent experiments build on those findings.
 
 ---
 
@@ -406,23 +408,180 @@ The initial signal health check produced false failures on all BPSK, QPSK, and G
 
 ---
 
-## What Comes Next
+## Session 2 — Cross-Session Stability
 
-| Step | Description |
-|---|---|
-| Preprocessing | Drop 100,000-sample transient · Normalise · Segment into 128-sample windows · Inject AWGN at 0, 10, 20 dB SNR · Save as .npy |
-| Experiment A | Binary CNN on BPSK data (temporal holdout split) — core thesis result |
-| Experiment B | Multi-modulation CNN — train on 3 modulations, test on the 4th without retraining |
-| Session 2 | Repeat recordings on a separate day — cross-session test required by thesis |
-| Chapter 4 | Write up Experiment A and B results |
+Session 2 was recorded on a different day with the hardware repositioned. The key test: do the hardware fingerprints remain stable across sessions?
+
+**Result: Yes.** CFO separation and RMS amplitude differences were consistent between S1 and S2. The fingerprints are stable across days, satisfying ER-4 (train/test separation across separate sessions).
+
+Notebook: `signal_analysis/rf_fingerprint_s2_v2_analysis.ipynb`
 
 ---
 
-## Files in This Repository
+## Preprocessing Pipeline
+
+Notebook: `preprocessing/rf_fingerprint_preprocessing.ipynb`
+
+Raw `.dat` recordings converted to numpy arrays for training:
+
+1. Drop first 100,000 samples (power-on transient)
+2. Normalise by maximum amplitude — no mean subtraction (preserves DC offset)
+3. Segment into 128-sample non-overlapping windows
+4. Label: DEV01 = 0, DEV02 = 1
+5. Inject AWGN offline at SNR 0, 10, 20 dB (30 dB excluded — ambient noise contamination)
+
+**Output:** 64 `.npy` files, 3.29 GB — 100,000 windows per modulation per session per SNR level.
+
+---
+
+## Experiment A — Binary Classifier (BPSK)
+
+Notebook: `experiment_A_analysis/experiment_A_cnn_training.ipynb`
+
+### CNN Architecture
+
+```
+Input (128, 2) → Conv1D(32,k=7)+AvgPool → Conv1D(64,k=5)+AvgPool
+→ Conv1D(128,k=3)+AvgPool → GlobalAvgPool → Dense(64)+Dropout(0.5) → Softmax(2)
+Total: 43,874 parameters
+```
+
+### Three-model progression
+
+| Model | Training data | Cross-session accuracy | SNR0 accuracy | Finding |
+|---|---|---|---|---|
+| Model 1 | S1 only | 50.13% | — | Session artefact exposed |
+| Model 2 | S1 + S2 | ~100% | 52% | Noise robustness missing |
+| Model 3 | S1+S2 + noise aug | 99.98% | 99.98% | ✅ Final model |
+
+### Final model results
+
+| SNR | Accuracy | FAR | FRR |
+|---|---|---|---|
+| Clean | 100.00% | 0.00% | 0.00% |
+| SNR 20 dB | 100.00% | 0.00% | 0.00% |
+| SNR 10 dB | 100.00% | 0.00% | 0.00% |
+| SNR 0 dB | 99.98% | 0.00% | 0.02% |
+
+### Verification suite
+
+Notebook: `experiment_A_analysis/experiment_A_verification.ipynb`
+
+- **V1 — Random labels:** 50.45% → no data shortcut
+- **V2 — Swapped sessions:** ~50–61% both directions → symmetric failure confirms session dependency fixed
+- **V3 — Leave-one-SNR-out:** 55% without SNR0 augmentation vs 99.97% with → noise augmentation is essential
+
+---
+
+## Experiment B — Multi-Modulation Classifier
+
+Notebook: `experiment_B_analysis/experiment_B_multimodulation.ipynb`
+
+### B1 — Combined model (all 4 modulations)
+
+| Modulation | Accuracy (Clean) | Notes |
+|---|---|---|
+| BPSK | 100.00% | Perfect |
+| QPSK | 97.85% | RMS amplitude as fingerprint (FDR=22.8) |
+| GFSK | 98.36% | RMS amplitude as fingerprint (FDR=15.1) |
+| OOK | 70.46% | ~50% silent windows carry no fingerprint |
+
+### B2 — Leave-One-Modulation-Out (LOMO)
+
+Every modulation fails when excluded from training (38–63% accuracy — random to below-random). All four modulations must be present in training. Cross-modulation transfer does not happen on its own.
+
+---
+
+## SQ3 — Raw IQ vs STFT Spectrogram
+
+Notebook: `experiment_SQ3_analysis/experiment_SQ3_iq_vs_stft.ipynb`
+
+Head-to-head comparison addressing Research Gap G3.
+
+| Metric | 1D CNN (Raw IQ) | 2D CNN (STFT) | Winner |
+|---|---|---|---|
+| Parameters | 43,874 | 101,058 | Raw IQ |
+| Accuracy @ SNR0 | 99.99% | 98.58% | Raw IQ |
+| FAR @ SNR0 | 0.00% | 1.22% | Raw IQ |
+| Latency (median) | 67.57 ms | 68.33 ms | Raw IQ |
+
+**Finding:** Raw IQ wins on every metric. STFT discards phase information when computing magnitude — that's where CFO offset and IQ imbalance live. Gap G3 closed.
+
+---
+
+## Experiment C — One-Class Authenticator
+
+Notebooks: `experiment_C_analysis/`
+
+Can we authenticate DEV01 without ever seeing DEV02 during training?
+
+**Approach:** Freeze the Experiment A CNN as a feature extractor → extract 64-dim embeddings → train One-Class SVM on DEV01 embeddings only.
+
+### C2 — Standard embedding
+
+| Modulation | TAR Clean | FAR Clean | SR-2 ≤5% |
+|---|---|---|---|
+| BPSK | 99.60% | 34.50% | ❌ |
+| QPSK | 100.00% | 25.20% | ❌ |
+| GFSK | 99.90% | 27.47% | ❌ |
+| OOK | 93.76% | 72.03% | ❌ |
+
+**AUC: 0.6115** — fails cross-modulation because embeddings entangle device identity with modulation type.
+
+### C3 — DANN (Domain-Adversarial Neural Network)
+
+Added a Gradient Reversal Layer to force modulation-invariant embeddings. Modulation head accuracy dropped from ~95% to 52% — partial suppression achieved.
+
+**Global OC-SVM (AUC: 0.7484):**
+
+| Modulation | TAR Clean | FAR Clean | SR-2 ≤5% |
+|---|---|---|---|
+| BPSK | 41.02% | 0.01% | ✅ |
+| QPSK | 41.71% | 19.07% | ❌ |
+| GFSK | 66.86% | 21.66% | ❌ |
+| OOK | 78.57% | 78.76% | ❌ |
+
+**Per-Modulation OC-SVM:**
+
+| Modulation | TAR Clean | FAR Clean | SR-2 ≤5% |
+|---|---|---|---|
+| BPSK | 76.87% | 0.02% | ✅ |
+| QPSK | 57.38% | 14.31% | ❌ |
+| GFSK | 4.36% | 1.78% | ✅ |
+| OOK | 2.60% | 5.69% | ❌ |
+
+AUC improved from 0.61 → 0.75. BPSK FAR dropped from 34.50% → 0.02%. Full cross-modulation one-class authentication requires contrastive training — identified as future work.
+
+---
+
+## Requirements Verification
+
+| Requirement | Target | Result | Status |
+|---|---|---|---|
+| SR-1: Accuracy ≥ 95% at SNR ≥ 20 dB | ≥ 95% | 100% | ✅ |
+| SR-2: FAR ≤ 5% | ≤ 5% | 0.00% (Exp A+B) | ✅ |
+| PR-1: Latency < 10 ms | < 10 ms | 0.131 ms | ✅ |
+| PR-2: Model < 500K parameters | < 500K | 43,874 | ✅ |
+| PR-3: Accuracy ≥ 80% at SNR 10 dB | ≥ 80% | 100% | ✅ |
+| ER-4: Cross-session stability | Stable | 99.98% cross-session | ✅ |
+
+---
+
+## Repository Structure
+
+| Folder | Contents |
+|---|---|
+| `signal_analysis/` | `rf_fingerprint_full_analysis.ipynb` (S1), `rf_fingerprint_s2_v2_analysis.ipynb` (S2) |
+| `preprocessing/` | `rf_fingerprint_preprocessing.ipynb` |
+| `experiment_A_analysis/` | `experiment_A_cnn_training.ipynb`, `experiment_A_verification.ipynb`, `experiment_A_documentation.ipynb` |
+| `experiment_B_analysis/` | `experiment_B_multimodulation.ipynb` |
+| `experiment_SQ3_analysis/` | `experiment_SQ3_iq_vs_stft.ipynb` |
+| `experiment_C_analysis/` | `experiment_C2_oneclass_embedding_svm.ipynb`, `experiment_C3_DANN_v2.ipynb` |
+
+### Session 1 Signal Analysis Plots
 
 | File | Description |
 |---|---|
-| `rf_fingerprint_full_analysis.ipynb` | The complete analysis notebook — runs in Google Colab |
 | `analysis_plots/00_health_check_summary.png` | Signal health check results |
 | `analysis_plots/01_iq_time_domain.png` | IQ waveforms per device per modulation |
 | `analysis_plots/02_constellation_all_modulations.png` | Constellation diagrams showing CFO rotation |
@@ -441,4 +600,4 @@ The initial signal health check produced false failures on all BPSK, QPSK, and G
 
 ---
 
-*Analysis conducted April 2026 · Kristianstad University (HKR) · DT339G VT26*
+*Last updated May 2026 · Kristianstad University (HKR) · DT339G VT26*
