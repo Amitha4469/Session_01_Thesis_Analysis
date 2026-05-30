@@ -1,0 +1,13 @@
+,"USRP B200 RX (DEV01, QPSK)","RTL-SDR V3 RX (DEV02, QPSK)"
+Amplitude mean,0.59398,0.26216
+Amplitude std,0.16571,0.09775
+Amplitude kurtosis,1.4570,-0.2529
+Amplitude skew,-1.1772,-0.0117
+CFO mean (mrad/s),2.84433,-46.92166
+CFO std (mrad/s),111.39517,95.21606
+RMS mean,0.61311,0.28190
+RMS std,0.00366,0.00755
+IQ amp imb mean (dB),+0.0304,-0.0180
+IQ amp imb std (dB),1.1007,0.9704
+IQ phase imb mean (°),+0.3656,+0.0602
+IQ phase imb std (°),6.9040,6.6440
